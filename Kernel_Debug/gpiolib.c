@@ -369,9 +369,8 @@ static long linehandle_ioctl(struct file *filep, unsigned int cmd,
 
 	if (cmd == GPIOHANDLE_GET_LINE_VALUES_IOCTL) {
 		int val;
-
 		memset(&ghd, 0, sizeof(ghd));
-
+		pr_info("IOCTL GET_LINE_VAL %s:%d\n" __func__, __LINE__);
 		/* TODO: check if descriptors are really input */
 		for (i = 0; i < lh->numdescs; i++) {
 			val = gpiod_get_value_cansleep(lh->descs[i]);
@@ -382,15 +381,16 @@ static long linehandle_ioctl(struct file *filep, unsigned int cmd,
 
 		if (copy_to_user(ip, &ghd, sizeof(ghd)))
 			return -EFAULT;
-
+		pr_info("copy to usr GET_LINE_VAL %s:%d\n" __func__, __LINE__);
 		return 0;
 	} else if (cmd == GPIOHANDLE_SET_LINE_VALUES_IOCTL) {
+		pr_info("IOCTL SET_LINE_VAL %s:%d\n" __func__, __LINE__);
 		int vals[GPIOHANDLES_MAX];
 
 		/* TODO: check if descriptors are really output */
 		if (copy_from_user(&ghd, ip, sizeof(ghd)))
 			return -EFAULT;
-
+		pr_info("copy from usr SET_LINE_VAL %s:%d\n" __func__, __LINE__);
 		/* Clamp all values to [0,1] */
 		for (i = 0; i < lh->numdescs; i++)
 			vals[i] = !!ghd.values[i];
@@ -977,6 +977,7 @@ static long gpio_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 		return 0;
 	} else if (cmd == GPIO_GET_LINEHANDLE_IOCTL) {
+		pr_info("executed IOCTL GET_LINEHANDLE %s:%d\n" __func__, __LINE__);
 		return linehandle_create(gdev, ip);
 	} else if (cmd == GPIO_GET_LINEEVENT_IOCTL) {
 		return lineevent_create(gdev, ip);
