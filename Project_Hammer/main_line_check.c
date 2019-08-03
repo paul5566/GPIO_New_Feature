@@ -26,7 +26,6 @@
 
 #include "gpio-utils.h"
 
-static int gpio_chip1_ary[32] = {0};
 const char *gpio_chiplist[8];
 
 /*
@@ -86,11 +85,15 @@ void print_flags(unsigned long flags)
 static void print_all(struct node *head){
 	struct node *current;
 	current = head;
-	while(current->next != NULL)//current->value != NULL the last point would not print out
+	while(current != NULL)//current->value != NULL the last point would not print out
 	{
 		printf("device name:%s\n",current-> gpio_chip_name);
 		printf("\n***the chip_number is %d***\n", current->gpio_chip_no);
 		current = current->next;
+		for(int i = 0; i < 32; i++)
+		{
+			printf("%s:line[%d]= %d\n",current->gpio_chip_name,i,current->gpio_line[i]);
+		}
 	}
 }
 
@@ -113,13 +116,13 @@ static struct node *find_tail(struct node *head){
 	Create Node Error Handling
 */
 
-void create_new_node(struct node *head,const char*device_name,int val){
+static struct node *create_new_node(struct node *head,const char*device_name,int val){
 
 	struct node *new_node;
     struct node *current_tail;
 
     new_node = malloc(sizeof(struct node));
-	if (head == NULL)
+	if (new_node == NULL)
 	{
 		printf("the memory allocation failed\n");
 	}
@@ -127,7 +130,81 @@ void create_new_node(struct node *head,const char*device_name,int val){
 	new_node->gpio_chip_name = device_name;
     current_tail = find_tail(head);
     current_tail->next = new_node;
-    new_node->next = NULL;
+	new_node->next = NULL;
+	return new_node;
+}
+
+/*
+ *	Stored The Array[32] to linked list in this program
+ */
+
+int INFO_STORE(const char *device_name,struct node *info_store)
+{
+	struct gpiochip_info cinfo;
+	char *chrdev_name;
+	int fd;
+	int i;
+	int ret;
+	ret = asprintf(&chrdev_name, "/dev/%s", device_name);
+	if (ret < 0)
+		return -ENOMEM;
+
+	fd = open(chrdev_name, 0);
+	if (fd == -1) {
+		ret = -errno;
+		fprintf(stderr, "Failed to open %s\n", chrdev_name);
+		goto exit_close_error;
+	}
+	/* Inspect this GPIO chip */
+	ret = ioctl(fd, GPIO_GET_CHIPINFO_IOCTL, &cinfo);
+	if (ret == -1) {
+		ret = -errno;
+		perror("Failed to issue CHIPINFO IOCTL\n");
+		goto exit_close_error;
+	}
+	fprintf(stdout, "GPIO chip: %s, \"%s\", %u GPIO lines\n",
+		cinfo.name, cinfo.label, cinfo.lines);
+
+	/* Loop over the lines and print info */
+	for (i = 0; i < cinfo.lines; i++) {
+		struct gpioline_info linfo;
+
+		memset(&linfo, 0, sizeof(linfo));
+		linfo.line_offset = i;
+
+		ret = ioctl(fd, GPIO_GET_LINEINFO_IOCTL, &linfo);
+		if (ret == -1) {
+			ret = -errno;
+			perror("Failed to issue LINEINFO IOCTL\n");
+			goto exit_close_error;
+		}
+		fprintf(stdout, "\tline %2d:", linfo.line_offset);
+		if (linfo.name[0])
+			fprintf(stdout, " \"%s\"", linfo.name);
+		else
+			fprintf(stdout, " unnamed");
+		//line info used/unused
+		if (linfo.consumer[0]){
+			fprintf(stdout, " \"%s\"", linfo.consumer);
+			info_store->gpio_line[i] = 1;
+		}
+		else{
+			fprintf(stdout, " unused");
+			info_store->gpio_line[i] = 0;
+		}
+		if (linfo.flags) {
+			fprintf(stdout, " [");
+			print_flags(linfo.flags);
+			fprintf(stdout, "]");
+		}
+		fprintf(stdout, "\n");
+	}
+
+exit_close_error:
+	if (close(fd) == -1)
+		perror("Failed to close GPIO character device file");
+	free(chrdev_name);
+	return ret;
 }
 
 /*
@@ -136,6 +213,7 @@ void create_new_node(struct node *head,const char*device_name,int val){
 static int LIST_DEV_NODE(DIR *dp,const struct dirent *ent,struct node *head){
 	int ret_val;
 	int gpiochip_count = 0;
+	struct list *cur_dev_node;
 	dp = opendir("/dev");
 	if (!dp) {
 		ret_val = -errno;
@@ -153,7 +231,9 @@ static int LIST_DEV_NODE(DIR *dp,const struct dirent *ent,struct node *head){
  			*
  			*/
 			//create linkedlist
-			create_new_node(head,ent->d_name,gpiochip_count);
+			cur_dev_node = create_new_node(head,ent->d_name,gpiochip_count);
+			//fill gpiochip information
+			INFO_STORE(ent->d_name,cur_dev_node);
 			gpiochip_count++;
 		}
 		else{
@@ -186,6 +266,7 @@ int main(int argc, char **argv)
 	//struct node *assign_chip_info;
 
 	head = malloc(sizeof(struct node));//memory allocate a segment
+
 	head->next = NULL;
 
 	if (head == NULL)
