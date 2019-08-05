@@ -23,7 +23,7 @@
 #include <getopt.h>
 #include <sys/ioctl.h>
 #include <linux/gpio.h>
-
+#include <string.h>
 #include "gpio-utils.h"
 
 
@@ -36,9 +36,9 @@ struct node {
 	int gpio_line[32];
 };
 
-static void remove_all(struct node *head)
+static void remove_all(struct node *h)
 {
-	struct node *current = head->next;
+	struct node *current = h->next;
 	struct node *next = current->next;
 
 	while(current && next)//current->value != NULL the last point would not print out
@@ -48,16 +48,36 @@ static void remove_all(struct node *head)
 		current = next;
 	}
 }
+/*
+ *	Check the gpiochip line is used/unused
+ */
+static int check_line_used(struct node *h,const char* dev_name,int line_no)
+{
+	struct node *crnt = h->next;
 
 
-static void print_all_status(struct node *head)
+	while(crnt)
+	{
+		if( strncmp(dev_name, crnt->gpio_chip_name,9) ){
+			crnt = crnt->next;
+		}
+		else{
+			if(crnt->gpio_line[line_no] == 0)
+				return 0;
+			else
+				return -1;
+		}
+	}
+	return -2;//the device_name is not matched
+}
+
+static void print_all_status(struct node *h)
 {
 	struct node *current;
 
-	current = head;
+	current = h;
 	while(current)//current->value != NULL the last point would not print out
 	{
-		//skip the head node
 		if(current-> gpio_chip_name){
 			printf("device name:%s\n",current-> gpio_chip_name);
 			for(int i = 0; i < 32; i++)
@@ -67,11 +87,11 @@ static void print_all_status(struct node *head)
 	}
 }
 
-static struct node *find_tail(struct node *head)
+static struct node *find_tail(struct node *h)
 {
 	struct node *current;
 
-	current = head;
+	current = h;
 	while(current->next != NULL)
 	{
 		current = current->next;
@@ -79,7 +99,7 @@ static struct node *find_tail(struct node *head)
 	return current;
 }
 
-static struct node *create_new_node(struct node *head, const char*device_name)
+static struct node *create_new_node(struct node *h, const char*device_name)
 {
 	struct node *new_node;
     struct node *current_tail;
@@ -91,7 +111,7 @@ static struct node *create_new_node(struct node *head, const char*device_name)
 		return NULL;
 	}
 	new_node->gpio_chip_name = device_name;
-    current_tail = find_tail(head);
+    current_tail = find_tail(h);
     current_tail->next = new_node;
 	new_node->next = NULL;
 	printf("create new node chipname is %s\n",device_name);
@@ -99,7 +119,7 @@ static struct node *create_new_node(struct node *head, const char*device_name)
 }
 
 
-static int list_and_store_device(const char *device_name, struct node *head)
+static int list_and_store_device(const char *device_name, struct node *h)
 {
 	struct gpiochip_info cinfo;
 	char *chrdev_name;
@@ -133,7 +153,7 @@ static int list_and_store_device(const char *device_name, struct node *head)
 
 	// Get the GPIO chip info succes here,
 	// sure things, malloc the linkedlist node
-	n = create_new_node(head, device_name);
+	n = create_new_node(h, device_name);
 	if (!n)
 		return -1;
 
@@ -166,7 +186,7 @@ exit_close_error:
 	return ret;
 }
 
-static int store_status(struct node *head)
+static int store_status(struct node *h)
 {
 	int ret;
 	const struct dirent *ent;
@@ -181,7 +201,7 @@ static int store_status(struct node *head)
 
 	while (ent = readdir(dp), ent) {
 		if (check_prefix(ent->d_name, "gpiochip")) {
-				ret = list_and_store_device(ent->d_name, head);
+				ret = list_and_store_device(ent->d_name, h);
 				if (ret)
 						break;
 		}
@@ -196,15 +216,28 @@ static int store_status(struct node *head)
 int main(int argc, char **argv)
 {
 	int ret;
+	int check;
 	struct node head;
+	//test
 
 	/* First, stoed all the GPIO chip/line status in linkedlist */
 	ret = store_status(&head);
 	if (ret)
 		return -1;
 
-	print_all_status(&head);
+	check = check_line_used(&head,"gpiochip0",3);
+	if(check < 0){
+		if(-2 == check){
+			printf("no such a device\n");
+			return -1;
+		}
+		else{
+			printf("the line is used\n");
+			return -2;
+		}
+	}
+	printf("line is not used\n");
+	//print_all_status(&head);
 	remove_all(&head);
-
 	return 0;
 }
